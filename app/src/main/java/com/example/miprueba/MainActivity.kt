@@ -7,8 +7,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Bluetooth
@@ -29,6 +36,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Speed
@@ -39,10 +47,13 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,13 +74,18 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -79,17 +95,28 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
+/**
+ * Pantallas navegables del sistema
+ */
 enum class Screen(val title: String, val icon: ImageVector) {
     LOGIN("Login", Icons.Default.Lock),
     MONITORING("Monitoreo", Icons.Default.Sensors),
     ACTUATOR("Actuadores", Icons.Default.Tune)
 }
 
+/**
+ * MainActivity - Punto de entrada de la aplicación de Evaluación Sumativa 2 IoT
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         val securityHelper = SecurityHelper(applicationContext)
         val iotConnectivity = IoTConnectivity()
 
@@ -104,6 +131,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Configuración del tema de la aplicación (Material 3)
+ */
 @Composable
 fun AppTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -124,6 +154,9 @@ fun AppTheme(
     )
 }
 
+/**
+ * MipruebaApp - Composable raíz que gestiona el Scaffold y la barra de navegación inferior
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MipruebaApp(
@@ -136,16 +169,36 @@ fun MipruebaApp(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        text = when (currentScreen) {
-                            Screen.LOGIN -> "Inicio de Sesión"
-                            Screen.MONITORING -> "Monitoreo de Sensores"
-                            Screen.ACTUATOR -> "Control de Actuadores"
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = when (currentScreen) {
+                                Screen.LOGIN -> "Inicio de Sesión"
+                                Screen.MONITORING -> "Monitoreo de Sensores"
+                                Screen.ACTUATOR -> "Control de Actuadores"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                actions = {
+                    BadgedBox(
+                        badge = {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text("ISO 27400", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        modifier = Modifier.padding(end = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = "ISO 27400 Security",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -190,6 +243,9 @@ fun MipruebaApp(
     }
 }
 
+/**
+ * Pantalla 1: LoginScreen con soporte para almacenamiento seguro ISO 27400 (EncryptedSharedPreferences)
+ */
 @Composable
 fun LoginScreen(
     securityHelper: SecurityHelper?,
@@ -217,13 +273,19 @@ fun LoginScreen(
             tint = MaterialTheme.colorScheme.primary
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text = "Acceso Seguro IoT",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
+        )
+
+        Text(
+            text = "Cifrado AES-256 Android Keystore (ISO 27400)",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -238,16 +300,25 @@ fun LoginScreen(
                 )
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Usuario Guardado (Encriptado):",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Usuario Guardado (Cifrado Keystore):",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = savedUsername,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -304,41 +375,93 @@ fun LoginScreen(
                 .fillMaxWidth()
                 .height(50.dp)
         ) {
-            Text("Iniciar Sesión", fontSize = 16.sp)
+            Text("Iniciar Sesión", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
+/**
+ * Pantalla 2: MonitoringScreen con flujo de lecturas en tiempo real
+ */
 @Composable
 fun MonitoringScreen(
     iotConnectivity: IoTConnectivity,
     onNavigateToActuator: () -> Unit,
     onNavigateToLogin: () -> Unit
 ) {
-    val sensorList = remember { iotConnectivity.getSensorData() }
+    var sensorReadings by remember { mutableStateOf(iotConnectivity.getSensorReadingsSnapshot()) }
+    var isLiveActive by remember { mutableStateOf(true) }
+
+    // Recolectar Flow en tiempo real cuando la simulación en vivo está activa
+    LaunchedEffect(isLiveActive) {
+        if (isLiveActive) {
+            iotConnectivity.getSensorDataFlow().collect { updatedSensors ->
+                sensorReadings = updatedSensors
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text(
-            text = "Lecturas de Sensores en Tiempo Real",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
         ) {
-            items(sensorList) { sensor ->
-                SensorCard(sensorName = sensor.first, sensorValue = sensor.second)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Sensores IoT Activos",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "Actualización en tiempo real vía Flow",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (isLiveActive) Color(0xFF4CAF50) else Color.Gray)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isLiveActive) "LIVE" else "PAUSED",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(sensorReadings, key = { it.id }) { sensor ->
+                SensorReadingCard(sensor = sensor)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -365,19 +488,31 @@ fun MonitoringScreen(
     }
 }
 
+/**
+ * Tarjeta individual para presentar lecturas de sensores con su estado e icono correspondiente
+ */
 @Composable
-fun SensorCard(sensorName: String, sensorValue: String) {
-    val icon = when {
-        sensorName.contains("Temp", ignoreCase = true) -> Icons.Default.Thermostat
-        sensorName.contains("Hum", ignoreCase = true) -> Icons.Default.WaterDrop
-        sensorName.contains("Pres", ignoreCase = true) -> Icons.Default.Speed
-        sensorName.contains("Vib", ignoreCase = true) -> Icons.Default.Vibration
-        else -> Icons.Default.Sensors
+fun SensorReadingCard(sensor: SensorReading) {
+    val icon = when (sensor.type) {
+        SensorType.TEMPERATURE -> Icons.Default.Thermostat
+        SensorType.HUMIDITY -> Icons.Default.WaterDrop
+        SensorType.PRESSURE -> Icons.Default.Speed
+        SensorType.VIBRATION -> Icons.Default.Vibration
+    }
+
+    val iconColor = when (sensor.type) {
+        SensorType.TEMPERATURE -> Color(0xFFE53935)
+        SensorType.HUMIDITY -> Color(0xFF1E88E5)
+        SensorType.PRESSURE -> Color(0xFF8E24AA)
+        SensorType.VIBRATION -> Color(0xFFFB8C00)
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier
@@ -385,30 +520,94 @@ fun SensorCard(sensorName: String, sensorValue: String) {
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(iconColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = iconColor
+                )
+            }
+
             Spacer(modifier = Modifier.width(16.dp))
-            Column {
+
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = sensorName,
+                    text = sensor.name,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = sensor.value,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = sensor.unit,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = sensorValue,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    text = sensor.timestamp,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+                Badge(
+                    containerColor = if (sensor.isNormalStatus) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                    contentColor = if (sensor.isNormalStatus) Color(0xFF2E7D32) else Color(0xFFC62828)
+                ) {
+                    Text(
+                        text = if (sensor.isNormalStatus) "Normal" else "Alerta",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }
 }
 
+/**
+ * Compatible con SensorCard básico para interoperabilidad
+ */
+@Composable
+fun SensorCard(sensorName: String, sensorValue: String) {
+    SensorReadingCard(
+        sensor = SensorReading(
+            id = "legacy",
+            name = sensorName,
+            value = sensorValue.split(" ").firstOrNull() ?: sensorValue,
+            unit = sensorValue.split(" ").getOrNull(1) ?: "",
+            type = when {
+                sensorName.contains("Temp", ignoreCase = true) -> SensorType.TEMPERATURE
+                sensorName.contains("Hum", ignoreCase = true) -> SensorType.HUMIDITY
+                sensorName.contains("Pres", ignoreCase = true) -> SensorType.PRESSURE
+                else -> SensorType.VIBRATION
+            }
+        )
+    )
+}
+
+/**
+ * Pantalla 3: ActuatorScreen para control de actuadores vía Bluetooth BLE y Wi-Fi
+ */
 @Composable
 fun ActuatorScreen(
     iotConnectivity: IoTConnectivity,
@@ -416,13 +615,16 @@ fun ActuatorScreen(
     onNavigateToLogin: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var sliderValue by remember { mutableFloatStateOf(50f) }
     var isActuatorOn by remember { mutableStateOf(true) }
 
-    val modeOptions = listOf("Automático", "Manual", "Eco")
-    var selectedMode by remember { mutableStateOf(modeOptions[0]) }
+    val modeOptions = ActuatorMode.entries
+    var selectedMode by remember { mutableStateOf(ActuatorMode.AUTOMATIC) }
 
-    var statusMessage by remember { mutableStateOf("") }
+    var transmissionResult by remember { mutableStateOf<TransmissionResult?>(null) }
+    var isTransmitting by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -443,7 +645,11 @@ fun ActuatorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.PowerSettingsNew, contentDescription = null)
+                        Icon(
+                            imageVector = Icons.Default.PowerSettingsNew,
+                            contentDescription = null,
+                            tint = if (isActuatorOn) MaterialTheme.colorScheme.primary else Color.Gray
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Estado: ${if (isActuatorOn) "ENCENDIDO" else "APAGADO"}",
@@ -460,7 +666,8 @@ fun ActuatorScreen(
 
                 Text(
                     text = "Potencia / Velocidad: ${sliderValue.toInt()}%",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Slider(
                     value = sliderValue,
@@ -494,7 +701,7 @@ fun ActuatorScreen(
                                 onClick = null
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = mode)
+                            Text(text = mode.displayName)
                         }
                     }
                 }
@@ -502,8 +709,8 @@ fun ActuatorScreen(
         }
 
         Text(
-            text = "Transmisión de Comandos IoT",
-            style = MaterialTheme.typography.titleSmall,
+            text = "Transmisión Inalámbrica IoT",
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
 
@@ -512,56 +719,96 @@ fun ActuatorScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Button(
+                enabled = !isTransmitting,
                 onClick = {
-                    val command = "Actuador [Estado=${if (isActuatorOn) "ON" else "OFF"}, Potencia=${sliderValue.toInt()}%, Modo=$selectedMode]"
-                    val response = iotConnectivity.sendBluetoothData(command)
-                    statusMessage = response
-                    Toast.makeText(context, response, Toast.LENGTH_SHORT).show()
+                    coroutineScope.launch {
+                        isTransmitting = true
+                        val command = ActuatorCommand(
+                            isEnabled = isActuatorOn,
+                            powerPercentage = sliderValue.toInt(),
+                            mode = selectedMode
+                        )
+                        val result = iotConnectivity.sendActuatorCommandAsync(command, TransmissionProtocol.BLUETOOTH_BLE)
+                        transmissionResult = result
+                        isTransmitting = false
+                        Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(Icons.Default.Bluetooth, contentDescription = null)
+                if (isTransmitting) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Bluetooth, contentDescription = null)
+                }
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Bluetooth")
+                Text("Bluetooth BLE")
             }
 
             Button(
+                enabled = !isTransmitting,
                 onClick = {
-                    val command = "Actuador [Estado=${if (isActuatorOn) "ON" else "OFF"}, Potencia=${sliderValue.toInt()}%, Modo=$selectedMode]"
-                    val response = iotConnectivity.sendWifiData(command)
-                    statusMessage = response
-                    Toast.makeText(context, response, Toast.LENGTH_SHORT).show()
+                    coroutineScope.launch {
+                        isTransmitting = true
+                        val command = ActuatorCommand(
+                            isEnabled = isActuatorOn,
+                            powerPercentage = sliderValue.toInt(),
+                            mode = selectedMode
+                        )
+                        val result = iotConnectivity.sendActuatorCommandAsync(command, TransmissionProtocol.WIFI)
+                        transmissionResult = result
+                        isTransmitting = false
+                        Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(Icons.Default.Wifi, contentDescription = null)
+                if (isTransmitting) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Wifi, contentDescription = null)
+                }
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Wi-Fi")
+                Text("Wi-Fi TCP")
             }
         }
 
-        AnimatedVisibility(visible = statusMessage.isNotEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        AnimatedVisibility(
+            visible = transmissionResult != null,
+            enter = slideInVertically() + fadeIn(),
+            exit = fadeOut()
+        ) {
+            transmissionResult?.let { result ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = statusMessage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Confirmación [${result.protocol.displayName} - ${result.timestamp}]",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text = result.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
                 }
             }
         }
